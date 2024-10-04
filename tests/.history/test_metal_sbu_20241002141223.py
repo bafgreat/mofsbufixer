@@ -1,0 +1,10 @@
+from mofsbufixer import script 
+
+def test_metal_sbu(filename):
+    '''
+    Test the metal_sbu script with a sample filename.
+    '''
+    metal_sbu(filename)
+
+
+# test_metal_sbu('../../SBU_BU_with_dummy/AVIHIY_metal_sbu_1.xyz')
