@@ -69,6 +69,7 @@ def find_metal(ase_atoms):
 
     """
     metals = sorted(list(set([i.symbol for i in ase_atoms if i.symbol in all_metals])))
+    metals = [i for i in metals if i not in ['X']]
     return '_'.join(metals)
 
 
@@ -203,7 +204,7 @@ def paddlewheel_extension_form(ase_atom, all_metals):
     # Filter out the symbols that are in the list of metals or are C, O, or H
     non_metal_symbols = [
         symbol for symbol in atomic_symbols
-        if symbol not in all_metals and symbol not in ['C', 'O', 'H']
+        if symbol not in all_metals and symbol not in ['C', 'O', 'H', 'X']
     ]
 
     # Count the occurrences of each non-metal symbol
@@ -239,12 +240,152 @@ def sub_dummy_with_hydrogens(ase_atom):
     return x_indices, ase_atom
 
 
+def remove_item_from_list(list1, list2):
+    """
+    This function removes items from one list that are also present in another list.
+
+    **Parameters**
+        - list1: list
+        - list2: list
+
+    **Returns**
+        - new_list: list
+        - containing the items that are not present in list2.
+    """
+    new_list = []
+    for i in list1:
+        if i not in list2:
+            new_list.append(i)
+    return new_list
+
+import numpy as np
+from ase import Atoms
+
+def set_distance(ase_atom, index1, index2, distance):
+    """
+    Sets the distance between two atoms in an ASE Atoms object,
+    only moving the atom at index2.
+
+    **Parameters:**
+        - ase_atom(Atoms): ASE Atoms object.
+        - index1 (int): Index of the first atom (reference atom).
+        - index2 (int): Index of the second atom (the atom to move).
+        - distance (float): The target distance to set between the two atoms.
+
+    **Returns:**
+        - ase_atom: modified atom
+        """
+    # Get the positions of the two atoms
+    pos1 = ase_atom.positions[index1]
+    pos2 = ase_atom.positions[index2]
+
+    # Calculate the current distance vector and its magnitude
+    current_vector = pos2 - pos1
+    current_distance = np.linalg.norm(current_vector)
+    if current_distance == 0:
+        current_distance = 1e-10
+
+    # Normalize the vector to get the direction
+    direction = current_vector / current_distance
+
+    # Set the new position for the atom at index2
+    new_pos2 = pos1 + direction * distance
+    ase_atom.positions[index2] = new_pos2
+    return ase_atom
+
+
+def manipulate_organic_sbu(ase_atom, distance=1.2):
+    """
+    Manipulates organic secondary building units (SBUs) by identifying and transforming dummy atoms,
+    symmetrizing the structure, and generating chemical identifiers. The function focuses on handling
+    nitrogen-dummy atom interactions and adjusting distances between atoms.
+
+    **Procedure:**
+    1. Identify all dummy atoms (marked as 'X') in the atomic structure.
+    2. Determine if any dummy atom is directly connected to a nitrogen atom (symbol 'N').
+       - Nitrogen atoms in MOFs typically form dative covalent bonds with central metals,
+         and in these cases, the dummy atom should be removed before symmetrization.
+    3. For each dummy atom, identify the atoms connected to it based on proximity (distances).
+       - Store the index of the atom directly connected to the dummy atom to help reassign
+         atom distances later.
+    4. Remove dummy atoms connected to nitrogen from the symmetrization process,
+       while keeping track of their presence for later use.
+    5. Convert the remaining dummy atoms into hydrogen atoms ('H') to facilitate symmetrization.
+    6. Perform molecular symmetrization on the modified structure (with hydrogen atoms).
+    7. Generate the IUPAC name of the symmetrized molecule using its InChIKey.
+    8. After symmetrization, replace the hydrogen atoms back to dummy atoms ('X').
+    9. Adjust the distances between atoms to the specified distance (default 1.2 Å),
+       particularly between the dummy atoms and their mapped neighbors.
+    10. Return both the IUPAC name and the final modified ASE Atoms object with symmetrized structure
+        and adjusted atom distances.
+
+    **Parameters:**
+    - ase_atom: ASE Atoms object
+        The atomic structure to manipulate. The structure should contain dummy atoms ('X')
+        representing placeholders in the structure that will either be replaced or removed
+        depending on their interaction with nitrogen atoms.
+    - distance: float, optional (default=1.2)
+        The target distance (in angstroms) between dummy atoms and their second closest neighboring atoms
+        after manipulation. This is crucial for correctly placing the atoms during structure optimization.
+
+    **Returns:**
+    - iupac_name: str
+        The IUPAC name of the symmetrized molecule, generated using its InChIKey.
+    - edited_atom: ASE Atoms object
+        The modified ASE Atoms object, with dummy atoms adjusted, symmetrized, and distances set accordingly.
+    """
+    # Define the indices of dummy atoms ('X') and hydrogen atoms ('H')
+    x_indices = []
+    nitrongen_x = []
+    mapper = {}
+    # atom_neighbors, _ = mofdeconstructor.compute_ase_neighbour(ase_atom)
+    for atoms in ase_atom:
+        if atoms.symbol == 'X':
+            x_indices.append(atoms.index)
+    for x in x_indices:
+        distances = ase_atom.get_distances(x, range(len(ase_atom)))
+        min_index = np.argmin(distances)
+        distances[min_index] = np.inf
+        second_min_index = np.argmin(distances)
+        # neighbour = atom_neighbors[second_min_index]
+        # neighbour = [i for i in neighbour if i!=x]
+        # print (f"neighbour:{neighbour}")
+        mapper[x] = second_min_index
+        if  ase_atom[second_min_index].symbol in ['N']:
+            nitrongen_x.append(x)
+        # elif len(neighbour)==2 and ase_atom[second_min_index].symbol in ['O', 'S', 'Se']:
+        #     nitrongen_x.append(x)
+
+    if len(x_indices) > 0:
+        no_n_indices = remove_item_from_list(x_indices, nitrongen_x)
+        fixer_atom = ase_atom.copy()
+        all_indices_with_no_n = [i for i in range(len(ase_atom)) if i not in nitrongen_x]
+        for i in no_n_indices:
+            fixer_atom[i].symbol = 'H'
+        fixer_atom = fixer_atom[all_indices_with_no_n]
+        sym_mol, _ = symmetrize.symmetrize_molecule(fixer_atom)
+
+        inchi_key = ase_to_inchi(sym_mol)
+        iupac_name = inchikey_to_name(inchi_key)
+        edited_atom = sym_mol + ase_atom[nitrongen_x]
+        for i in no_n_indices:
+            edited_atom[i].symbol = 'X'
+        for i in mapper:
+            atom_index = mapper[i]
+            edited_atom = set_distance(edited_atom, atom_index, i, 1.2)
+        if len(iupac_name) == 2:
+            edited_atom.info['iupac_name'] = iupac_name[1]
+            return iupac_name[0], edited_atom, len(x_indices)
+    return None
+
+
 def log_failure(filename, outfile):
     """
     This function logs failures to a file called 'Failed.txt'.
     """
     with open(f"{outfile}.txt", "a") as file:
         file.write(f"{filename}\n")
+
 
 def check_same_x_positions(ase_atom):
     """
@@ -268,7 +409,198 @@ def check_same_x_positions(ase_atom):
     return np.all(np.isclose(x_positions, x_positions[0]))
 
 
+def check_organic_in_filename(filename):
+    """
+    This function checks if the word 'organic' is present in the given filename.
+
+    **Parameters:**
+    - filename: str
+        The path or name of the file to check.
+
+    **Returns:**
+    - bool: True if 'organic' is found in the filename, False otherwise.
+    """
+    # Use regex to search for 'organic' in the filename
+    if re.search(r'organic', filename, re.IGNORECASE):
+        return True
+    else:
+        return False
+
+
+def check_metal_in_filename(filename):
+    """
+    This function checks if the word 'organic' is present in the given filename.
+
+    **Parameters:**
+    - filename: str
+        The path or name of the file to check.
+
+    **Returns:**
+    - bool: True if 'organic' is found in the filename, False otherwise.
+    """
+    # Use regex to search for 'organic' in the filename
+    if re.search(r'metal', filename, re.IGNORECASE):
+        return True
+    else:
+        return False
+
+def check_sbu_type(sbu_type, checker):
+    """
+    This function checks if the word 'organic' is present in the given filename.
+
+    **Parameters:**
+    - filename: str
+        The path or name of the file to check.
+
+    **Returns:**
+    - bool: True if 'organic' is found in the filename, False otherwise.
+    """
+    # Use regex to search for 'organic' in the filename
+    if re.search(rf'{checker}', sbu_type, re.IGNORECASE):
+        return True
+    else:
+        return False
+
+
+def manipulate_metal_sbu(ase_atom, distance=1.2):
+
+    x_indices = []
+    mapper = {}
+    atom_neighbors, _ = mofdeconstructor.compute_ase_neighbour(ase_atom)
+
+    for atoms in ase_atom:
+        if atoms.symbol == 'X':
+            x_indices.append(atoms.index)
+    for x in x_indices:
+        distances = ase_atom.get_distances(x, range(len(ase_atom)))
+        min_index = np.argmin(distances)
+        distances[min_index] = np.inf
+        second_min_index = np.argmin(distances)
+        mapper[x] = second_min_index
+
+    if len(x_indices) > 0:
+        fixer_atom = ase_atom.copy()
+        for i in x_indices:
+            fixer_atom[i].symbol = 'H'
+        sym_mol, _ = symmetrize.symmetrize_molecule(fixer_atom)
+
+        edited_atom = sym_mol
+        for i in x_indices:
+            edited_atom[i].symbol = 'X'
+        mask = [i for i in range(len(ase_atom)) if i not in x_indices]
+        sbu_atom = edited_atom[mask]
+        graph, _ = mofdeconstructor.compute_ase_neighbour(sbu_atom)
+        connected_conponents = mofdeconstructor.connected_components(graph)
+        for i in mapper:
+            atom_index = mapper[i]
+            edited_atom = set_distance(edited_atom, atom_index, i, 1.2)
+        if len(connected_conponents)==1:
+            return edited_atom, len(x_indices)
+
+    return None
+
+
+def remove_duplicate_atoms(atoms, tolerance=1e-5):
+    """
+    Removes duplicate atoms from an ASE Atoms object based on positions.
+
+    Parameters:
+    atoms (Atoms): ASE Atoms object from which to remove duplicates.
+    tolerance (float): Tolerance for considering two positions identical. Defaults to 1e-5.
+
+    Returns:
+    Atoms: ASE Atoms object with duplicate positions removed.
+    """
+    unique_positions = []
+    unique_indices = []
+
+    positions = atoms.get_positions()
+    for i, pos in enumerate(positions):
+        if not any(np.allclose(pos, p, atol=tolerance) for p in unique_positions):
+            unique_positions.append(pos)
+            unique_indices.append(i)
+
+    return atoms[unique_indices]
+
+
 def sbu_compiler(filename, metal_sbu_path, organic_sbu_path):
+    """
+    This function reads a metal SBU file, extracts the coordinates and symmetry information,
+    and returns them in the form of a dictionary.
+
+    **Parameters**
+        - filename: str
+            The file path to the metal SBU file.
+
+    **Returns**
+        - dict: A dictionary containing the coordinates and symmetry information.
+    """
+    base_name = filename.split('/')[-1].split('.')[0].split('_')[0]
+    ase_atom = coords_library.read_ase(filename)
+    ase_atom.pbc = False
+
+    # Assuming these functions are defined elsewhere in your code
+    is_organic = check_organic_in_filename(filename)
+    is_metal = check_metal_in_filename(filename)
+
+    if is_organic:
+        try:
+            organic_data = manipulate_organic_sbu(ase_atom, distance=1.2)
+            if organic_data is not None:
+                iupac_name, new_atom, length_x = organic_data
+                sbu_name = f'{iupac_name}_X{length_x}.xyz'
+                new_atom.write(f'{organic_sbu_path}/{sbu_name}')
+        except Exception as e:
+            print(f"Error occurred while manipulating organic SBU: {e}")
+            log_failure(filename, 'organic_sbu_error')
+    elif is_metal:
+        try:
+            sbu_type = ase_atom.info.get('sbu_type', None)
+            is_rod = check_sbu_type(sbu_type, 'rodlike')
+
+            if is_rod:
+                return
+            else:
+                ase_atom = remove_duplicate_atoms(ase_atom, tolerance=1e-5)
+                metal_data = manipulate_metal_sbu(ase_atom)
+                is_paddlewheel = check_sbu_type(sbu_type, 'paddlewheel')
+
+                if metal_data is not None:
+                    edited_atom, length_x = metal_data
+                    metal = find_metal(edited_atom)
+                    if is_paddlewheel:
+                        formular = paddlewheel_extension_form(edited_atom, metal)
+                        if len(formular) == 0:
+                            sbu_name = f'{metal}_{sbu_type}_X{length_x}.xyz'
+                        else:
+                            sbu_name = f'{metal}_{formular}_{sbu_type}_X{length_x}.xyz'
+                    elif sbu_type != 'still checking!':
+                        sbu_name = f'{metal}_{sbu_type}_X{length_x}.xyz'
+                    else:
+                        formular = non_metal_formula(edited_atom, metal)
+                        sbu_name = f'{metal}_{formular}_X{length_x}.xyz'
+
+                    # Save the edited structure
+                    edited_atom.write(f'{metal_sbu_path}/{sbu_name}')
+
+        except Exception as e:
+            print(f"Error occurred while manipulating metal SBU: {e}")
+            log_failure(filename, 'metal_sbu_error')
+
+
+
+
+
+    # sbu_type = ase_atom.info.get('sbu_type', None)
+    # x_indices, ase_atom = sub_dummy_with_hydrogens(ase_atom)
+    # if len(x_indices) == 0:
+    #     log_failure(filename, 'mofstructure_error')
+    #     return
+    # else:
+    #     try:
+    #         if
+
+def sbu_compiler2(filename, metal_sbu_path, organic_sbu_path):
     """
     This function reads a metal SBU file, extracts the coordinates and symmetry information,
     and returns them in the form of a dictionary.
@@ -293,18 +625,19 @@ def sbu_compiler(filename, metal_sbu_path, organic_sbu_path):
             sym_mol, point = symmetrize.symmetrize_molecule(ase_atom)
             new_atom, connected_conponents = add_dummy(sym_mol, x_indices)
             check_x = check_same_x_positions(new_atom)
+            overlap = mofdeconstructor.inter_atomic_distance_check(new_atom)
             print (check_x)
-            if len(connected_conponents) == 1 and not check_x:
+            if len(connected_conponents) == 1 and overlap and not check_x:
                 new_atom.info['refcode'] = base_name
                 if sbu_type is not None and len(x_indices) < 25:
                     metal = find_metal(sym_mol)
                     if sbu_type != 'still checking!':
                         sbu_name = f'{metal}_{sbu_type}_X{len(x_indices)}.xyz'
                     elif 'paddlewheel' in sbu_type:
-                        formular = paddlewheel_extension_form(ase_atom, all_metals)
+                        formular = paddlewheel_extension_form(new_atom, all_metals)
                         sbu_name = f'{metal}_{sbu_type}_{formular}_X{len(x_indices)}.xyz'
                     else:
-                        formular = non_metal_formula(ase_atom, all_metals)
+                        formular = non_metal_formula(new_atom, all_metals)
                         sbu_name = f'{metal}_{formular}_X{len(x_indices)}.xyz'
                     new_atom.write(f'{metal_sbu_path}/{sbu_name}')
                 else:

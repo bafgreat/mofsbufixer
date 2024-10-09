@@ -1,0 +1,7 @@
+.history/
+.pyenv/
+.vscode/
+poetry.lock
+__pycache__/
+mofsbufixer/script/__pycache__
+ mofsbufixer/script/__pycache__/compile_sbu.cpython-310.pyc
