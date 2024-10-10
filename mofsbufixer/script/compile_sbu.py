@@ -5,9 +5,7 @@ import numpy as np
 from collections import Counter
 from mofstructure import mofdeconstructor
 from mofsbufixer.input_output import coords_library
-from mofsbufixer.input_output import filetyper
 from mofsbufixer.sym import symmetrize
-from mofsbufixer.data import inchi_name_data
 
 
 all_metals = mofdeconstructor.transition_metals()
@@ -26,7 +24,6 @@ def find_key_by_value(data, target):
     for key, value in data.items():
         if key == target:
             chemical_names = value['name']
-            print (chemical_names)
             return chemical_names
     return None
 
@@ -257,9 +254,6 @@ def remove_item_from_list(list1, list2):
         if i not in list2:
             new_list.append(i)
     return new_list
-
-import numpy as np
-from ase import Atoms
 
 def set_distance(ase_atom, index1, index2, distance):
     """
@@ -494,7 +488,7 @@ def manipulate_metal_sbu(ase_atom, distance=1.2):
         for i in mapper:
             atom_index = mapper[i]
             edited_atom = set_distance(edited_atom, atom_index, i, 1.2)
-        if len(connected_conponents)==1:
+        if len(connected_conponents) == 1:
             return edited_atom, len(x_indices)
 
     return None
