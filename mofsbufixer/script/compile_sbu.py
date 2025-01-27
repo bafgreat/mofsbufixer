@@ -582,16 +582,78 @@ def check_sbu_type(sbu_type, checker):
     else:
         return False
 
+def fix_carboxylates(ase_atoms):
+    """
+    Identifies and processes carboxylate groups in the given ASE atoms object.
 
-def manipulate_metal_sbu(ase_atom, distance=1.2):
+    Parameters:
+        ase_atoms (ase.Atoms): The ASE Atoms object representing the structure.
+    """
+    # Compute neighbors for each atom
+    atom_neighbors, _ = mofdeconstructor.compute_ase_neighbour(ase_atoms)
+    new_positions = []
+    nunber_of_x = []
+    for atom_idx in atom_neighbors:
+        # Check if the atom is carbon
+        if ase_atoms[atom_idx].symbol == 'C':
+            # Get the neighbors of the carbon atom
+            neighbor_indices = atom_neighbors[atom_idx]
+            oxygens = [i for i in neighbor_indices if ase_atoms[i].symbol in ['O', 'S']]
+            check_x = [i for i in neighbor_indices if ase_atoms[i].symbol == 'X']
+            if len(check_x)== 0 and len(oxygens) == 2:
+                p1, p2 = oxygens
+                coord_1 = ase_atoms[p1].position
+                coord_2 = ase_atoms[p2].position
+                coord_c = ase_atoms[atom_idx].position
+                p_new = find_fourth_point(coord_1, coord_c, coord_2, 1.2)
+                new_positions.append(p_new)
+    if len(new_positions) == 1:
+        new_atom = ase.Atom(symbol='X', position=new_positions[0])
+        edited_atoms = ase_atoms + new_atom
+        return edited_atoms, len(new_positions)
+
+    elif len(new_positions) > 1:
+        new_atom = ase.Atoms(['X'] * len(new_positions), positions=new_positions)
+        edited_atoms = ase_atoms + new_atom
+        return edited_atoms, len(new_positions)
+    else:
+        return ase_atoms, 0
+
+
+def inter_atomic_distance_check(ase_atom, min_bond_length=1.2):
+    '''
+    A function that checks whether two atoms are within a distance 1.0 Amstrong unless it is an R-H bond
+
+    **parameters:**
+        ase_atom : ASE atoms object
+
+    **returns**
+        boolean :
+    '''
+    valid = True
+    distances = ase_atom.get_all_distances(mic=True)
+    for i in range(len(distances)):
+        if ase_atom[i].symbol != 'H':
+            for j in range(len(distances[i])):
+                if i != j:
+                    if distances[i, j] < min_bond_length:
+                        valid = False
+                        break
+    return valid
+
+def manipulate_metal_sbu(ase_atom):
 
     x_indices = []
     mapper = {}
-    atom_neighbors, _ = mofdeconstructor.compute_ase_neighbour(ase_atom)
-
     for atoms in ase_atom:
         if atoms.symbol == 'X':
             x_indices.append(atoms.index)
+    if len(x_indices) < 2 or len(x_indices) > 24:
+        return
+    if len(x_indices) == 3:
+        return
+    if len(ase_atom)>70:
+        return
     for x in x_indices:
         distances = ase_atom.get_distances(x, range(len(ase_atom)))
         min_index = np.argmin(distances)
@@ -609,14 +671,18 @@ def manipulate_metal_sbu(ase_atom, distance=1.2):
         for i in x_indices:
             edited_atom[i].symbol = 'X'
         mask = [i for i in range(len(ase_atom)) if i not in x_indices]
-        sbu_atom = edited_atom[mask]
-        graph, _ = mofdeconstructor.compute_ase_neighbour(sbu_atom)
+        # sbu_atom = edited_atom[mask]
+        edited_atom, added_x = fix_carboxylates(edited_atom)
+        graph, _ = mofdeconstructor.compute_ase_neighbour(edited_atom)
         connected_conponents = mofdeconstructor.connected_components(graph)
-        for i in mapper:
-            atom_index = mapper[i]
-            edited_atom = set_distance(edited_atom, atom_index, i, 1.2)
-        if len(connected_conponents) == 1:
-            return edited_atom, len(x_indices)
+        if len(connected_conponents) > 1:
+            return
+        # for i in mapper:
+        #     atom_index = mapper[i]
+        #     edited_atom = set_distance(edited_atom, atom_index, i, distance)
+        valid = inter_atomic_distance_check(edited_atom)
+        if len(connected_conponents) == 1 and valid:
+            return edited_atom, len(x_indices)+added_x,  mask
 
     return None
 
@@ -644,7 +710,7 @@ def remove_duplicate_atoms(atoms, tolerance=1e-5):
     return atoms[unique_indices]
 
 
-def sbu_compiler(filename, metal_sbu_path, organic_sbu_path):
+def sbu_compiler_organic(filename, organic_sbu_path):
     """
     This function reads a metal SBU file, extracts the coordinates and symmetry information,
     and returns them in the form of a dictionary.
@@ -656,15 +722,15 @@ def sbu_compiler(filename, metal_sbu_path, organic_sbu_path):
     **Returns**
         - dict: A dictionary containing the coordinates and symmetry information.
     """
-    base_name = filename.split('/')[-1].split('.')[0].split('_')[0]
+    # base_name = filename.split('/')[-1].split('.')[0].split('_')[0]
     ase_atom = coords_library.read_ase(filename)
     ase_atom.pbc = False
     ase_atom.cell = None
+    if len(ase_atom) < 4:
+        return
 
     # Assuming these functions are defined elsewhere in your code
     is_organic = check_organic_in_filename(filename)
-    is_metal = check_metal_in_filename(filename)
-
     if is_organic:
         try:
             organic_data = manipulate_organic_sbu(ase_atom, distance=1.2)
@@ -675,35 +741,59 @@ def sbu_compiler(filename, metal_sbu_path, organic_sbu_path):
         except Exception as e:
             print(f"Error occurred while manipulating organic SBU: {e}")
             log_failure(filename, 'organic_sbu_error')
-    elif is_metal:
+    return
+def sbu_compiler_metal(filename, metal_sbu_path):
+    """
+    This function reads a metal SBU file, extracts the coordinates and symmetry information,
+    and returns them in the form of a dictionary.
+
+    **Parameters**
+        - filename: str
+            The file path to the metal SBU file.
+
+    **Returns**
+        - dict: A dictionary containing the coordinates and symmetry information.
+    """
+    # base_name = filename.split('/')[-1].split('.')[0].split('_')[0]
+    ase_atom = coords_library.read_ase(filename)
+    ase_atom.pbc = False
+    ase_atom.cell = None
+    if len(ase_atom) < 4:
+        return
+    is_metal = check_metal_in_filename(filename)
+    if is_metal:
         try:
             sbu_type = ase_atom.info.get('sbu_type', None)
             is_rod = check_sbu_type(sbu_type, 'rodlike')
 
             if is_rod:
                 return
-            else:
-                ase_atom = remove_duplicate_atoms(ase_atom, tolerance=1e-5)
-                metal_data = manipulate_metal_sbu(ase_atom)
-                is_paddlewheel = check_sbu_type(sbu_type, 'paddlewheel')
+            ase_atom = remove_duplicate_atoms(ase_atom, tolerance=1e-5)
+            metal_data = manipulate_metal_sbu(ase_atom)
+            is_paddlewheel = check_sbu_type(sbu_type, 'paddlewheel')
 
-                if metal_data is not None:
-                    edited_atom, length_x = metal_data
-                    metal = find_metal(edited_atom)
-                    if is_paddlewheel:
-                        formular = paddlewheel_extension_form(edited_atom, metal)
-                        if len(formular) == 0:
-                            sbu_name = f'{metal}_{sbu_type}_X{length_x}.xyz'
-                        else:
-                            sbu_name = f'{metal}_{formular}_{sbu_type}_X{length_x}.xyz'
-                    elif sbu_type != 'still checking!':
+            if metal_data is not None:
+                edited_atom, length_x, mask = metal_data
+                metal = find_metal(edited_atom)
+                if is_paddlewheel:
+                    formular = paddlewheel_extension_form(edited_atom[mask], metal)
+                    if length_x <= 2 or length_x > 6:
+                        return
+
+                    if len(formular) == 0:
                         sbu_name = f'{metal}_{sbu_type}_X{length_x}.xyz'
                     else:
-                        formular = non_metal_formula(edited_atom, metal)
-                        sbu_name = f'{metal}_{formular}_X{length_x}.xyz'
+                        sbu_name = f'{metal}_{formular}_{sbu_type}_X{length_x}.xyz'
+                elif sbu_type != 'still checking!':
+                    sbu_name = f'{metal}_{sbu_type}_X{length_x}.xyz'
+                else:
+                    formular = non_metal_formula(edited_atom[mask], metal)
+                    if len(formular) == 0:
+                        return
+                    sbu_name = f'{metal}_{formular}_X{length_x}.xyz'
 
-                    # Save the edited structure
-                    edited_atom.write(f'{metal_sbu_path}/{sbu_name}')
+                # Save the edited structure
+                edited_atom.write(f'{metal_sbu_path}/{sbu_name}')
 
         except Exception as e:
             print(f"Error occurred while manipulating metal SBU: {e}")
