@@ -3,6 +3,7 @@ import re
 import ase
 import numpy as np
 from collections import Counter
+from ase.geometry import get_angles
 from mofstructure import mofdeconstructor
 from mofsbufixer.input_output import coords_library
 from mofsbufixer.sym import symmetrize
@@ -288,6 +289,123 @@ def set_distance(ase_atom, index1, index2, distance):
     return ase_atom
 
 
+def find_fourth_point(p1, p0, p2, distance=1.2):
+    """
+    Calculate a point P_new such that:
+    - It lies in the same plane as the points P1, P0, and P2.
+    - It is at a specified distance from P0 (default: 1.2).
+    - It is in the direction opposite to the angle formed by P1, P0, and P2.
+
+    **Parameters**:
+        p1 (array-like): Coordinates of the first point (P1) as [x, y, z].
+        p0 (array-like): Coordinates of the second point (P0) as [x, y, z].
+        p2 (array-like): Coordinates of the third point (P2) as [x, y, z].
+        distance (float): The distance from P0 to the new point (P_new). Default is 1.2.
+
+    **Returns**:
+        np.ndarray: Coordinates of the new point P_new as [x, y, z].
+    """
+    p1 = np.array(p1)
+    p0 = np.array(p0)
+    p2 = np.array(p2)
+
+    # Step 1: Compute the normal vector to the plane defined by P1, P0, P2
+    v1 = p1 - p0
+    v2 = p2 - p0
+    normal = np.cross(v1, v2)
+    normal_unit = normal / np.linalg.norm(normal)
+
+    # Step 2: Compute the bisector of the angle at P0 between P1 and P2
+    v1_unit = v1 / np.linalg.norm(v1)
+    v2_unit = v2 / np.linalg.norm(v2)
+    bisector = v1_unit + v2_unit
+    bisector_unit = bisector / np.linalg.norm(bisector)
+
+    # Step 3: Reverse the bisector direction to point opposite to the angle
+    opposite_dir = -bisector_unit
+
+    # Step 4: Project the opposite direction onto the plane P1, P0, P2
+    projection = opposite_dir - np.dot(opposite_dir, normal_unit) * normal_unit
+    projected_dir_unit = projection / np.linalg.norm(projection)
+
+    # Step 5: Calculate the new point P_new
+    p_new = p0 + distance * projected_dir_unit
+
+    return p_new
+
+def find_fourth_point_previous(p1, p0, p2, distance=1.8):
+    """
+    Find a fourth point that lies in the plane of three points and is opposite
+    the angle formed by vectors p1-p0 and p2-p0.
+
+    Args:
+        p1 (array-like): Coordinates of point 1.
+        p0 (array-like): Coordinates of point 0 (origin point).
+        p2 (array-like): Coordinates of point 2.
+        distance (float): Distance from point 0 to the fourth point.
+
+    Returns:
+        numpy.ndarray: Coordinates of the fourth point.
+    """
+    p1 = np.array(p1)
+    p0 = np.array(p0)
+    p2 = np.array(p2)
+
+    # Vectors defining the plane
+    v1 = p1 - p0
+    v2 = p2 - p0
+
+    # Normal vector to the plane
+    normal = np.cross(v1, v2)
+    normal /= np.linalg.norm(normal)
+
+    # Normalize v1 and v2
+    v1_norm = v1 / np.linalg.norm(v1)
+    v2_norm = v2 / np.linalg.norm(v2)
+
+    # Bisector of the angle
+    bisector = v1_norm + v2_norm
+    bisector /= np.linalg.norm(bisector)
+
+    # Reflect the bisector vector across the plane
+    reflection = bisector - 2 * np.dot(bisector, normal) * normal
+
+    # Negate the reflection to ensure it's on the opposite side of the angle
+    reflection_opposite = -reflection
+
+    # Scale the reflected vector to the desired distance and add to p0
+    p3 = p0 + reflection_opposite * distance
+
+    return p3
+
+
+def find_correct_coordinats(sym_atom, atom_index, mapper):
+    atom_neighbors, _ = mofdeconstructor.compute_ase_neighbour(sym_atom)
+    new_positions = []
+    done_index = []
+
+    for i in atom_index:
+        n_atom = mapper.get(i)
+        connected_atoms = atom_neighbors[n_atom]
+        connected_atoms = [x for x in connected_atoms if x not in atom_index]
+        if len(connected_atoms):
+            p1, p2 = connected_atoms
+            coord_1  = sym_atom[p1].position
+            coord_2  = sym_atom[p2].position
+            coord_n = sym_atom[n_atom].position
+            p_new = find_fourth_point(coord_1, coord_n, coord_2, 1.2)
+            new_positions.append(p_new)
+            done_index.append(i)
+
+    if len(done_index) == 1:
+        return ase.Atom(symbol='X' , position=new_positions[0])
+
+    elif len(done_index) > 1:
+        return ase.Atoms(['X'] * len(done_index), positions=new_positions)
+
+
+
+
 def manipulate_organic_sbu(ase_atom, distance=1.2):
     """
     Manipulates organic secondary building units (SBUs) by identifying and transforming dummy atoms,
@@ -332,7 +450,10 @@ def manipulate_organic_sbu(ase_atom, distance=1.2):
     x_indices = []
     nitrongen_x = []
     mapper = {}
+    # com = ase_atom.get_center_of_mass()
     # atom_neighbors, _ = mofdeconstructor.compute_ase_neighbour(ase_atom)
+    smi = ase_atom.info.get('smi')
+    inchikey = ase_atom.info.get('inchikey')
     for atoms in ase_atom:
         if atoms.symbol == 'X':
             x_indices.append(atoms.index)
@@ -358,10 +479,13 @@ def manipulate_organic_sbu(ase_atom, distance=1.2):
             fixer_atom[i].symbol = 'H'
         fixer_atom = fixer_atom[all_indices_with_no_n]
         sym_mol, _ = symmetrize.symmetrize_molecule(fixer_atom)
-
+        # sym_mol.positions -= com
         inchi_key = ase_to_inchi(sym_mol)
         iupac_name = inchikey_to_name(inchi_key)
-        edited_atom = sym_mol + ase_atom[nitrongen_x]
+        # print ('This is mapper', mapper, nitrongen_x)
+        nitrogen_x_atoms = find_correct_coordinats(sym_mol, nitrongen_x, mapper)
+        if nitrogen_x_atoms is not None:
+            edited_atom = sym_mol + nitrogen_x_atoms
         for i in no_n_indices:
             edited_atom[i].symbol = 'X'
         for i in mapper:
@@ -369,6 +493,9 @@ def manipulate_organic_sbu(ase_atom, distance=1.2):
             edited_atom = set_distance(edited_atom, atom_index, i, 1.2)
         if len(iupac_name) == 2:
             edited_atom.info['iupac_name'] = iupac_name[1]
+            edited_atom.info['smile'] = smi
+            edited_atom.info['inchikey'] = inchikey
+
             return iupac_name[0], edited_atom, len(x_indices)
     return None
 
@@ -532,6 +659,7 @@ def sbu_compiler(filename, metal_sbu_path, organic_sbu_path):
     base_name = filename.split('/')[-1].split('.')[0].split('_')[0]
     ase_atom = coords_library.read_ase(filename)
     ase_atom.pbc = False
+    ase_atom.cell = None
 
     # Assuming these functions are defined elsewhere in your code
     is_organic = check_organic_in_filename(filename)
@@ -649,3 +777,60 @@ def sbu_compiler2(filename, metal_sbu_path, organic_sbu_path):
             print(f"Error processing {filename}: {e}")
             log_failure(filename, 'Failed')
     return
+
+
+
+def add_atoms_to_molecule(molecule, atom_data):
+    """
+    Adds multiple atoms to specific atoms in a molecule.
+
+    Parameters:
+        molecule (pybel.Molecule): The Pybel molecule object.
+        atom_data (list of tuples): List of tuples where each tuple contains:
+            - atom_idx (int): The index of the atom to which the new atom will be attached (1-based).
+            - new_atom_symbol (str): Symbol of the new atom to add (e.g., "H").
+            - bond_order (int, optional): Bond order for the new bond (default is 1).
+
+    Returns:
+        pybel.Molecule: The modified molecule.
+    """
+    # Access the underlying OBMol object
+    obmol = molecule.OBMol
+
+    for data in atom_data:
+        # Unpack the data
+        atom_idx, new_atom_symbol, *bond_order = data
+        bond_order = bond_order[0] if bond_order else 1  # Default bond order is 1
+
+        # Get the target atom by index
+        target_atom = obmol.GetAtom(atom_idx)
+        if not target_atom:
+            raise ValueError(f"Atom index {atom_idx} is invalid.")
+
+        # Create a new atom
+        new_atom = OBAtom()
+        new_atom.SetAtomicNum(pybel.ob.GetAtomicNum(new_atom_symbol))
+        obmol.AddAtom(new_atom)
+
+        # Create a bond between the target atom and the new atom
+        bond_success = obmol.AddBond(target_atom.GetIdx(), new_atom.GetIdx(), bond_order)
+        if not bond_success:
+            raise RuntimeError(f"Failed to add a bond between atom {atom_idx} and the new atom.")
+
+    # Update the molecule and return it
+    molecule.OBMol = obmol
+    return pybel.Molecule(obmol)
+
+# # Example usage
+# mol = pybel.readstring("smi", "CCO")  # Example molecule (ethanol)
+
+# # List of atoms to add: [(target_index, new_atom_symbol, bond_order)]
+# atoms_to_add = [
+#     (2, "H", 1),  # Add a hydrogen atom to the second atom (carbon)
+#     (3, "Cl", 1)  # Add a chlorine atom to the third atom (oxygen)
+# ]
+
+# modified_mol = add_atoms_to_molecule(mol, atoms_to_add)
+
+# # Output the modified molecule
+# print(modified_mol.write("smi"))

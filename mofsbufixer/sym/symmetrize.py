@@ -2,6 +2,8 @@
 
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer, PointGroupAnalyzer
+from pymatgen.io.babel import BabelMolAdaptor
+
 
 
 def symmetrize_molecule(ase_atom):
@@ -52,3 +54,26 @@ def symmetrize_crystal(ase_atom):
 
     return ase_atoms, space_group
 
+
+def pybel_symmetrize(ase_atom):
+    '''
+    Function to symmetrize a molecule. The function takes an
+    ase atom object and converts it to pymatgen molecule object
+    and then perform the symmetry transformation and returns both
+    the symmetrized molecule and the point group.
+
+    **parameter**
+    ase_atom : ASE Atom object
+    **returns**
+    ase_atoms : ASE Atom object
+    point_group : str
+
+    '''
+    molecule = AseAtomsAdaptor.get_molecule(ase_atom)
+    
+    symmetrizer = PointGroupAnalyzer(molecule)
+    point_group = symmetrizer.get_pointgroup()
+    symmetrized = symmetrizer.symmetrize_molecule()
+    new_molecule = symmetrized['sym_mol']
+    ase_atoms = AseAtomsAdaptor.get_atoms(new_molecule)
+    return ase_atoms, point_group

@@ -11,6 +11,8 @@ ase = "^3.23.0"
 pytest = "^8.3.3"
 mofstructure = "^0.1.8.1"
 requests = "^2.32.3"
+rdkit-pypi = "^2022.9.5"
+rdkit = "^2024.3.5"
 
 
 [build-system]
