@@ -687,7 +687,7 @@ def manipulate_metal_sbu(ase_atom):
             fixer_atom[i].symbol = 'H'
         # sym_mol, point_group = symmetrize.symmetrize_molecule(fixer_atom)
 
-        # edited_atom = sym_mol
+        edited_atom = fixer_atom
         for i in x_indices:
             edited_atom[i].symbol = 'X'
         mask = [i for i in range(len(ase_atom)) if i not in x_indices]
