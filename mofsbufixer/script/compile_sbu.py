@@ -66,7 +66,8 @@ def find_metal(ase_atoms):
             The metal(s) found in the ASE Atom object, formatted as a hyphen-separated string.
 
     """
-    metals = sorted(list(set([i.symbol for i in ase_atoms if i.symbol in all_metals])))
+    metals = sorted(
+        list(set([i.symbol for i in ase_atoms if i.symbol in all_metals])))
     metals = [i for i in metals if i not in ['X']]
     return '_'.join(metals)
 
@@ -116,7 +117,8 @@ def ase_to_inchi(ase_atom):
     **Returns**
         str: The InChI string of the ASE Atom object.
     """
-    _, _, inChiKey = mofdeconstructor.compute_openbabel_cheminformatic(ase_atom)
+    _, _, inChiKey = mofdeconstructor.compute_openbabel_cheminformatic(
+        ase_atom)
     return inChiKey
 
 
@@ -138,10 +140,12 @@ def add_dummy(ase_atom, indices):
     mask = [i for i in range(len(ase_atom)) if i not in indices]
     ase_without_dummy = ase_atom[mask]
     atom_neighbors, _ = mofdeconstructor.compute_ase_neighbour(ase_atom)
-    connected_conponents = mofdeconstructor.connected_components(atom_neighbors)
+    connected_conponents = mofdeconstructor.connected_components(
+        atom_neighbors)
 
     # Add dummy atoms ('X') at the end of the structure, using the positions of removed atoms
-    dummy_atoms = ase.Atoms(['X'] * len(indices), positions=ase_atom.get_positions()[indices])
+    dummy_atoms = ase.Atoms(['X'] * len(indices),
+                            positions=ase_atom.get_positions()[indices])
 
     # Merge the structure without the original atoms and the new dummy atoms
     final_structure = ase_without_dummy + dummy_atoms
@@ -168,7 +172,8 @@ def non_metal_formula(ase_atom, all_metals):
     atomic_symbols = ase_atom.get_chemical_symbols()
 
     # Filter out the symbols that are in the list of metals
-    non_metal_symbols = [symbol for symbol in atomic_symbols if symbol not in all_metals]
+    non_metal_symbols = [
+        symbol for symbol in atomic_symbols if symbol not in all_metals]
 
     # Count the occurrences of each non-metal symbol
     symbol_counts = Counter(non_metal_symbols)
@@ -177,9 +182,11 @@ def non_metal_formula(ase_atom, all_metals):
     sorted_symbols = sorted(symbol_counts.items())
 
     # Create the chemical formula string
-    formula = ''.join(f"{symbol}{count if count > 1 else ''}" for symbol, count in sorted_symbols)
+    formula = ''.join(
+        f"{symbol}{count if count > 1 else ''}" for symbol, count in sorted_symbols)
 
     return formula
+
 
 def paddlewheel_extension_form(ase_atom, all_metals):
     """
@@ -212,9 +219,11 @@ def paddlewheel_extension_form(ase_atom, all_metals):
     sorted_symbols = sorted(symbol_counts.items())
 
     # Create the chemical formula string
-    formula = ''.join(f"{symbol}{count if count > 1 else ''}" for symbol, count in sorted_symbols)
+    formula = ''.join(
+        f"{symbol}{count if count > 1 else ''}" for symbol, count in sorted_symbols)
 
     return formula
+
 
 def sub_dummy_with_hydrogens(ase_atom):
     """
@@ -255,6 +264,7 @@ def remove_item_from_list(list1, list2):
         if i not in list2:
             new_list.append(i)
     return new_list
+
 
 def set_distance(ase_atom, index1, index2, distance):
     """
@@ -333,6 +343,7 @@ def find_fourth_point(p1, p0, p2, distance=1.2):
 
     return p_new
 
+
 def find_fourth_point_previous(p1, p0, p2, distance=1.8):
     """
     Find a fourth point that lies in the plane of three points and is opposite
@@ -390,20 +401,18 @@ def find_correct_coordinats(sym_atom, atom_index, mapper):
         connected_atoms = [x for x in connected_atoms if x not in atom_index]
         if len(connected_atoms):
             p1, p2 = connected_atoms
-            coord_1  = sym_atom[p1].position
-            coord_2  = sym_atom[p2].position
+            coord_1 = sym_atom[p1].position
+            coord_2 = sym_atom[p2].position
             coord_n = sym_atom[n_atom].position
             p_new = find_fourth_point(coord_1, coord_n, coord_2, 1.2)
             new_positions.append(p_new)
             done_index.append(i)
 
     if len(done_index) == 1:
-        return ase.Atom(symbol='X' , position=new_positions[0])
+        return ase.Atom(symbol='X', position=new_positions[0])
 
     elif len(done_index) > 1:
         return ase.Atoms(['X'] * len(done_index), positions=new_positions)
-
-
 
 
 def manipulate_organic_sbu(ase_atom, distance=1.2):
@@ -466,7 +475,7 @@ def manipulate_organic_sbu(ase_atom, distance=1.2):
         # neighbour = [i for i in neighbour if i!=x]
         # print (f"neighbour:{neighbour}")
         mapper[x] = second_min_index
-        if  ase_atom[second_min_index].symbol in ['N']:
+        if ase_atom[second_min_index].symbol in ['N']:
             nitrongen_x.append(x)
         # elif len(neighbour)==2 and ase_atom[second_min_index].symbol in ['O', 'S', 'Se']:
         #     nitrongen_x.append(x)
@@ -474,16 +483,18 @@ def manipulate_organic_sbu(ase_atom, distance=1.2):
     if len(x_indices) > 0:
         no_n_indices = remove_item_from_list(x_indices, nitrongen_x)
         fixer_atom = ase_atom.copy()
-        all_indices_with_no_n = [i for i in range(len(ase_atom)) if i not in nitrongen_x]
+        all_indices_with_no_n = [i for i in range(
+            len(ase_atom)) if i not in nitrongen_x]
         for i in no_n_indices:
             fixer_atom[i].symbol = 'H'
         fixer_atom = fixer_atom[all_indices_with_no_n]
-        sym_mol, _ = symmetrize.symmetrize_molecule(fixer_atom)
+        sym_mol, point_group = symmetrize.symmetrize_molecule(fixer_atom)
         # sym_mol.positions -= com
         inchi_key = ase_to_inchi(sym_mol)
         iupac_name = inchikey_to_name(inchi_key)
         # print ('This is mapper', mapper, nitrongen_x)
-        nitrogen_x_atoms = find_correct_coordinats(sym_mol, nitrongen_x, mapper)
+        nitrogen_x_atoms = find_correct_coordinats(
+            sym_mol, nitrongen_x, mapper)
         if nitrogen_x_atoms is not None:
             edited_atom = sym_mol + nitrogen_x_atoms
         for i in no_n_indices:
@@ -495,6 +506,7 @@ def manipulate_organic_sbu(ase_atom, distance=1.2):
             edited_atom.info['iupac_name'] = iupac_name[1]
             edited_atom.info['smile'] = smi
             edited_atom.info['inchikey'] = inchikey
+            # edited_atom.info['spacegroup'] = point_group
 
             return iupac_name[0], edited_atom, len(x_indices)
     return None
@@ -524,7 +536,8 @@ def check_same_x_positions(ase_atom):
     positions = ase_atom.get_positions()
 
     # Extract X positions of atoms labeled 'X'
-    x_positions = [pos[0] for symbol, pos in zip(symbols, positions) if symbol == 'X']
+    x_positions = [pos[0]
+                   for symbol, pos in zip(symbols, positions) if symbol == 'X']
 
     # Check if all X positions are the same using numpy's isclose to handle floating-point precision
     return np.all(np.isclose(x_positions, x_positions[0]))
@@ -565,6 +578,7 @@ def check_metal_in_filename(filename):
     else:
         return False
 
+
 def check_sbu_type(sbu_type, checker):
     """
     This function checks if the word 'organic' is present in the given filename.
@@ -582,6 +596,7 @@ def check_sbu_type(sbu_type, checker):
     else:
         return False
 
+
 def fix_carboxylates(ase_atoms):
     """
     Identifies and processes carboxylate groups in the given ASE atoms object.
@@ -598,9 +613,11 @@ def fix_carboxylates(ase_atoms):
         if ase_atoms[atom_idx].symbol == 'C':
             # Get the neighbors of the carbon atom
             neighbor_indices = atom_neighbors[atom_idx]
-            oxygens = [i for i in neighbor_indices if ase_atoms[i].symbol in ['O', 'S']]
-            check_x = [i for i in neighbor_indices if ase_atoms[i].symbol == 'X']
-            if len(check_x)== 0 and len(oxygens) == 2:
+            oxygens = [
+                i for i in neighbor_indices if ase_atoms[i].symbol in ['O', 'S']]
+            check_x = [
+                i for i in neighbor_indices if ase_atoms[i].symbol == 'X']
+            if len(check_x) == 0 and len(oxygens) == 2:
                 p1, p2 = oxygens
                 coord_1 = ase_atoms[p1].position
                 coord_2 = ase_atoms[p2].position
@@ -613,7 +630,8 @@ def fix_carboxylates(ase_atoms):
         return edited_atoms, len(new_positions)
 
     elif len(new_positions) > 1:
-        new_atom = ase.Atoms(['X'] * len(new_positions), positions=new_positions)
+        new_atom = ase.Atoms(['X'] * len(new_positions),
+                             positions=new_positions)
         edited_atoms = ase_atoms + new_atom
         return edited_atoms, len(new_positions)
     else:
@@ -641,6 +659,7 @@ def inter_atomic_distance_check(ase_atom, min_bond_length=1.2):
                         break
     return valid
 
+
 def manipulate_metal_sbu(ase_atom):
 
     x_indices = []
@@ -652,7 +671,7 @@ def manipulate_metal_sbu(ase_atom):
         return
     if len(x_indices) == 3:
         return
-    if len(ase_atom)>70:
+    if len(ase_atom) > 70:
         return
     for x in x_indices:
         distances = ase_atom.get_distances(x, range(len(ase_atom)))
@@ -665,9 +684,9 @@ def manipulate_metal_sbu(ase_atom):
         fixer_atom = ase_atom.copy()
         for i in x_indices:
             fixer_atom[i].symbol = 'H'
-        sym_mol, _ = symmetrize.symmetrize_molecule(fixer_atom)
+        # sym_mol, point_group = symmetrize.symmetrize_molecule(fixer_atom)
 
-        edited_atom = sym_mol
+        # edited_atom = sym_mol
         for i in x_indices:
             edited_atom[i].symbol = 'X'
         mask = [i for i in range(len(ase_atom)) if i not in x_indices]
@@ -681,8 +700,10 @@ def manipulate_metal_sbu(ase_atom):
         #     atom_index = mapper[i]
         #     edited_atom = set_distance(edited_atom, atom_index, i, distance)
         valid = inter_atomic_distance_check(edited_atom)
+        # edited_atom.info['spacegroup'] = point_group
         if len(connected_conponents) == 1 and valid:
-            return edited_atom, len(x_indices)+added_x,  mask
+
+            return adjust_x_distance(edited_atom), len(x_indices)+added_x,  mask
 
     return None
 
@@ -742,6 +763,41 @@ def sbu_compiler_organic(filename, organic_sbu_path):
             print(f"Error occurred while manipulating organic SBU: {e}")
             log_failure(filename, 'organic_sbu_error')
     return
+
+def adjust_x_distance(atoms: Atoms, symbol='X', target_distance=1.1):
+    """
+    Adjusts the position of atoms labeled as 'X' to be exactly target_distance away
+    from their closest neighbor while keeping the neighbor fixed.
+
+    Parameters:
+    atoms (ase.Atoms): ASE Atoms object
+    symbol (str): The atomic symbol to adjust (default: 'X')
+    target_distance (float): The desired distance between X and its closest atom (default: 1.0 Å)
+
+    Returns:
+    ase.Atoms: Modified Atoms object with adjusted X positions
+    """
+    new_positions = atoms.positions.copy()
+    indices_x = [i for i, atom in enumerate(atoms) if atom.symbol == symbol]
+
+    for i in indices_x:
+        pos_x = atoms.positions[i]
+        distances = np.linalg.norm(atoms.positions - pos_x, axis=1)
+        distances[i] = np.inf  # Ignore self-distance
+        closest_idx = np.argmin(distances)  # Find closest atom index
+        pos_closest = atoms.positions[closest_idx]
+
+        # Compute unit vector from closest atom to X
+        direction = pos_x - pos_closest
+        direction /= np.linalg.norm(direction)
+
+        # Move X to exactly target_distance away
+        new_positions[i] = pos_closest + direction * target_distance
+
+    atoms.set_positions(new_positions)
+    return atoms
+
+
 def sbu_compiler_metal(filename, metal_sbu_path):
     """
     This function reads a metal SBU file, extracts the coordinates and symmetry information,
@@ -776,7 +832,8 @@ def sbu_compiler_metal(filename, metal_sbu_path):
                 edited_atom, length_x, mask = metal_data
                 metal = find_metal(edited_atom)
                 if is_paddlewheel:
-                    formular = paddlewheel_extension_form(edited_atom[mask], metal)
+                    formular = paddlewheel_extension_form(
+                        edited_atom[mask], metal)
                     if length_x <= 2 or length_x > 6:
                         return
 
@@ -785,7 +842,7 @@ def sbu_compiler_metal(filename, metal_sbu_path):
                     else:
                         sbu_name = f'{metal}_{formular}_{sbu_type}_X{length_x}.xyz'
                 elif sbu_type != 'still checking!':
-                    sbu_name = f'{metal}_{sbu_type}_X{length_x}.xyz'
+                    sbu_name = f'{metal}_{sbu_type.lower()}_X{length_x}.xyz'
                 else:
                     formular = non_metal_formula(edited_atom[mask], metal)
                     if len(formular) == 0:
@@ -799,10 +856,6 @@ def sbu_compiler_metal(filename, metal_sbu_path):
             print(f"Error occurred while manipulating metal SBU: {e}")
             log_failure(filename, 'metal_sbu_error')
 
-
-
-
-
     # sbu_type = ase_atom.info.get('sbu_type', None)
     # x_indices, ase_atom = sub_dummy_with_hydrogens(ase_atom)
     # if len(x_indices) == 0:
@@ -811,6 +864,7 @@ def sbu_compiler_metal(filename, metal_sbu_path):
     # else:
     #     try:
     #         if
+
 
 def sbu_compiler2(filename, metal_sbu_path, organic_sbu_path):
     """
@@ -838,7 +892,6 @@ def sbu_compiler2(filename, metal_sbu_path, organic_sbu_path):
             new_atom, connected_conponents = add_dummy(sym_mol, x_indices)
             check_x = check_same_x_positions(new_atom)
             overlap = mofdeconstructor.inter_atomic_distance_check(new_atom)
-            print (check_x)
             if len(connected_conponents) == 1 and overlap and not check_x:
                 new_atom.info['refcode'] = base_name
                 if sbu_type is not None and len(x_indices) < 25:
@@ -846,7 +899,8 @@ def sbu_compiler2(filename, metal_sbu_path, organic_sbu_path):
                     if sbu_type != 'still checking!':
                         sbu_name = f'{metal}_{sbu_type}_X{len(x_indices)}.xyz'
                     elif 'paddlewheel' in sbu_type:
-                        formular = paddlewheel_extension_form(new_atom, all_metals)
+                        formular = paddlewheel_extension_form(
+                            new_atom, all_metals)
                         sbu_name = f'{metal}_{sbu_type}_{formular}_X{len(x_indices)}.xyz'
                     else:
                         formular = non_metal_formula(new_atom, all_metals)
@@ -856,18 +910,18 @@ def sbu_compiler2(filename, metal_sbu_path, organic_sbu_path):
                     inchi_key = ase_to_inchi(sym_mol)
                     iupac_name = inchikey_to_name(inchi_key)
                     if len(iupac_name) == 2:
-                        print (iupac_name[0], iupac_name[1])
+                        # print(iupac_name[0], iupac_name[1])
                         new_atom.info['iupac_name'] = iupac_name[1]
                         sbu_name = f'{iupac_name[0]}_X{len(x_indices)}.xyz'
                         new_atom.write(f'{organic_sbu_path}/{sbu_name}')
             else:
-                print(f"Error processing {filename}: More than one connected component")
+                print(
+                    f"Error processing {filename}: More than one connected component")
                 log_failure(filename, 'mofstructure_error_connected_component')
         except Exception as e:
             print(f"Error processing {filename}: {e}")
             log_failure(filename, 'Failed')
     return
-
 
 
 def add_atoms_to_molecule(molecule, atom_data):
@@ -890,7 +944,8 @@ def add_atoms_to_molecule(molecule, atom_data):
     for data in atom_data:
         # Unpack the data
         atom_idx, new_atom_symbol, *bond_order = data
-        bond_order = bond_order[0] if bond_order else 1  # Default bond order is 1
+        # Default bond order is 1
+        bond_order = bond_order[0] if bond_order else 1
 
         # Get the target atom by index
         target_atom = obmol.GetAtom(atom_idx)
@@ -903,9 +958,11 @@ def add_atoms_to_molecule(molecule, atom_data):
         obmol.AddAtom(new_atom)
 
         # Create a bond between the target atom and the new atom
-        bond_success = obmol.AddBond(target_atom.GetIdx(), new_atom.GetIdx(), bond_order)
+        bond_success = obmol.AddBond(
+            target_atom.GetIdx(), new_atom.GetIdx(), bond_order)
         if not bond_success:
-            raise RuntimeError(f"Failed to add a bond between atom {atom_idx} and the new atom.")
+            raise RuntimeError(
+                f"Failed to add a bond between atom {atom_idx} and the new atom.")
 
     # Update the molecule and return it
     molecule.OBMol = obmol
