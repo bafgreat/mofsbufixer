@@ -1,6 +1,7 @@
 import requests
 import re
 import ase
+from ase import Atoms, Atom
 import numpy as np
 from collections import Counter
 from ase.geometry import get_angles
